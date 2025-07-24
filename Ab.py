@@ -56,6 +56,13 @@ from core.validators import DataValidator, ParameterValidator
 from core.exceptions import get_error_handler
 from core.performance import get_performance_monitor, timer, cached
 
+# Phase 3 advanced features
+from core.plugins import get_plugin_manager, PluginManager, calculate_custom_indicator
+from core.multi_asset import AssetAllocation, MultiAssetPortfolio, BuyAndHoldMultiAsset
+from core.advanced_metrics import AdvancedMetrics, calculate_portfolio_metrics
+from core.risk_management import RiskManager, FixedFractionSizer, StopLossControl
+from core.parallel_processing import ParallelOptimizer, ParameterGrid
+
 # Basic strategies
 from strategies.basic_strategies import BuyAndHold, MACross, MAThreshold
 from strategies.threshold_strategies import Threshold
@@ -101,6 +108,21 @@ __all__ = [
     'timer',
     'cached',
     
+    # Phase 3 advanced features
+    'get_plugin_manager',
+    'PluginManager',
+    'calculate_custom_indicator',
+    'AssetAllocation',
+    'MultiAssetPortfolio',
+    'BuyAndHoldMultiAsset',
+    'AdvancedMetrics',
+    'calculate_portfolio_metrics',
+    'RiskManager',
+    'FixedFractionSizer',
+    'StopLossControl',
+    'ParallelOptimizer',
+    'ParameterGrid',
+    
     # Utility functions (from utils.helpers)
     'validate_date_range',
     'format_percentage',
@@ -117,9 +139,9 @@ __all__ = [
 ]
 
 # Module metadata
-__version__ = "2.1.0"
+__version__ = "3.0.0"
 __author__ = "Backtesting Framework Team"
-__description__ = "Algorithmic backtesting framework for financial markets"
+__description__ = "Advanced algorithmic backtesting framework with multi-asset, risk management, and parallel processing"
 
 def get_version():
     """Return the current version of the backtesting framework."""
@@ -261,9 +283,9 @@ def optimized_backtest(ticker, strategy_name, start_date, end_date, **params):
             monitor.print_summary()
 
 def show_framework_info():
-    """Show comprehensive framework information including Phase 2 features."""
-    print(f"Algorithmic Backtesting Framework v{__version__}")
-    print("=" * 60)
+    """Show comprehensive framework information including all phases."""
+    print(f"Advanced Algorithmic Backtesting Framework v{__version__}")
+    print("=" * 70)
     print("PHASE 1 - Core Framework:")
     print("• core.data_handler - StockData class")
     print("• core.indicators - Technical indicators") 
@@ -279,14 +301,129 @@ def show_framework_info():
     print("• core.exceptions - Improved error handling")
     print("• core.performance - Performance monitoring and optimization")
     print()
-    print("Available Functions:")
+    print("PHASE 3 - Advanced Features:")
+    print("• core.plugins - Plugin architecture for custom indicators")
+    print("• core.multi_asset - Multi-asset portfolio management")
+    print("• core.advanced_metrics - Advanced performance analytics")
+    print("• core.risk_management - Comprehensive risk controls")
+    print("• core.parallel_processing - Parameter optimization & Monte Carlo")
+    print()
+    print("Key Functions:")
     print("• list_strategies() - Show available strategies")
-    print("• quick_backtest() - Rapid strategy testing")
-    print("• create_strategy_by_name() - Factory-based strategy creation")
-    print("• optimized_backtest() - Enhanced backtest with monitoring")
-    print("• get_config() - Access configuration settings")
-    print("• get_performance_monitor() - Access performance monitoring")
-    print("=" * 60)
+    print("• optimize_strategy() - Parameter optimization with parallel processing")
+    print("• create_multi_asset_portfolio() - Multi-asset portfolio management")
+    print("• calculate_advanced_metrics() - Comprehensive performance analysis")
+    print("• setup_risk_management() - Risk management configuration")
+    print("=" * 70)
+
+def optimize_strategy(strategy_class, param_grid_dict, ticker, start_date, end_date, 
+                     n_jobs=-1, optimization_metric='sharpe_ratio'):
+    """
+    Optimize strategy parameters using parallel processing (Phase 3 feature).
+    
+    Args:
+        strategy_class: Strategy class to optimize
+        param_grid_dict (Dict): Parameter grid dictionary
+        ticker (str): Stock ticker
+        start_date: Start date
+        end_date: End date
+        n_jobs (int): Number of parallel jobs
+        optimization_metric (str): Metric to optimize
+        
+    Returns:
+        List: Best optimization results
+    """
+    param_grid = ParameterGrid(param_grid_dict)
+    optimizer = ParallelOptimizer(n_jobs=n_jobs, verbose=True)
+    
+    return optimizer.optimize_parameters(
+        strategy_class, param_grid, ticker, start_date, end_date,
+        optimization_metric=optimization_metric
+    )
+
+def create_multi_asset_portfolio(allocations_dict, rebalance_frequency='monthly'):
+    """
+    Create a multi-asset portfolio (Phase 3 feature).
+    
+    Args:
+        allocations_dict (Dict[str, float]): Asset allocations
+        rebalance_frequency (str): Rebalancing frequency
+        
+    Returns:
+        MultiAssetPortfolio: Multi-asset portfolio instance
+    """
+    allocation = AssetAllocation(allocations_dict, rebalance_frequency)
+    return MultiAssetPortfolio()
+
+def calculate_advanced_metrics(balance_df, benchmark_data=None, risk_free_rate=0.02):
+    """
+    Calculate comprehensive performance metrics (Phase 3 feature).
+    
+    Args:
+        balance_df (pd.DataFrame): Portfolio balance data
+        benchmark_data (pd.DataFrame, optional): Benchmark data
+        risk_free_rate (float): Risk-free rate
+        
+    Returns:
+        Dict: Advanced performance metrics
+    """
+    return calculate_portfolio_metrics(balance_df, benchmark_data, risk_free_rate)
+
+def setup_risk_management(stop_loss_pct=0.1, max_drawdown=0.2, position_size_method='fixed'):
+    """
+    Setup risk management system (Phase 3 feature).
+    
+    Args:
+        stop_loss_pct (float): Stop loss percentage
+        max_drawdown (float): Maximum drawdown threshold
+        position_size_method (str): Position sizing method
+        
+    Returns:
+        RiskManager: Configured risk manager
+    """
+    risk_manager = RiskManager()
+    
+    # Add position sizer
+    if position_size_method == 'fixed':
+        risk_manager.position_sizer = FixedFractionSizer(0.1)
+    
+    # Add risk controls
+    risk_manager.add_risk_control(StopLossControl(stop_loss_pct))
+    
+    return risk_manager
+
+def list_custom_indicators():
+    """List available custom indicators from the plugin system."""
+    plugin_manager = get_plugin_manager()
+    indicators = plugin_manager.list_indicators()
+    
+    print("Available Custom Indicators:")
+    print("=" * 50)
+    for name, description in indicators.items():
+        print(f"• {name}: {description}")
+    print("=" * 50)
+    print(f"Total: {len(indicators)} custom indicators available")
+
+def monte_carlo_backtest(strategy_class, strategy_params, ticker, start_date, end_date, 
+                        n_simulations=1000):
+    """
+    Run Monte Carlo analysis on a strategy (Phase 3 feature).
+    
+    Args:
+        strategy_class: Strategy class
+        strategy_params (Dict): Strategy parameters
+        ticker (str): Stock ticker
+        start_date: Start date
+        end_date: End date
+        n_simulations (int): Number of simulations
+        
+    Returns:
+        Dict: Monte Carlo analysis results
+    """
+    optimizer = ParallelOptimizer(verbose=True)
+    return optimizer.monte_carlo_analysis(
+        strategy_class, strategy_params, ticker, start_date, end_date, n_simulations
+    )
 
 # Backward compatibility aliases and wrapper functions
 # These ensure that existing notebooks continue to work without modification
@@ -313,25 +450,28 @@ def stochastic_indicator(df, column, out_fastk, out_k, out_d, k_window, fk_windo
     get_stochastic(df, column, out_fastk, out_k, out_d, k_window, fk_window, fd_window)
 
 # Print framework information on import
-print(f"Algorithmic Backtesting Framework v{__version__} loaded successfully")
-print("=" * 60)
+print(f"Advanced Algorithmic Backtesting Framework v{__version__} loaded successfully")
+print("=" * 70)
 print("PHASE 1 - Core modular structure:")
 print("• core.data_handler - StockData class")
 print("• core.indicators - Technical indicators") 
 print("• core.strategy_base - Strategy base class")
 print("• core.portfolio - Portfolio and BackTest classes")
 print("• strategies.* - Various trading strategies")
-print("• utils.* - Helper functions and constants")
 print()
 print("PHASE 2 - Enhanced capabilities:")
-print("• Strategy factory pattern with create_strategy_by_name()")
-print("• Configuration management with get_config()")
-print("• Data validation and error handling")
-print("• Performance monitoring with get_performance_monitor()")
-print("• Optimized backtesting with optimized_backtest()")
-print("=" * 60)
+print("• Strategy factory pattern & configuration management")
+print("• Data validation & enhanced error handling")
+print("• Performance monitoring & optimization")
+print()
+print("PHASE 3 - Advanced features:")
+print("• Plugin architecture for custom indicators")
+print("• Multi-asset portfolio management")
+print("• Advanced performance metrics & risk management")
+print("• Parallel parameter optimization & Monte Carlo analysis")
+print("=" * 70)
 print("Quick Start:")
-print("• list_strategies() - See available strategies")
-print("• show_framework_info() - Comprehensive feature overview") 
-print("• optimized_backtest('TQQQ', 'buyandhold', '2023-01-01', '2023-12-31')")
-print("=" * 60)
+print("• show_framework_info() - Comprehensive feature overview")
+print("• optimize_strategy(BuyAndHold, {'param': [1,2,3]}, 'TQQQ', '2023-01-01', '2023-12-31')")
+print("• create_multi_asset_portfolio({'TQQQ': 0.6, 'QLD': 0.4})")
+print("=" * 70)
