@@ -4,10 +4,15 @@
 import yfinance as yf
 import datetime as dt
 import pytz
-
+import warnings
 
 import numpy as np
 import pandas as pd
+
+# Suppress common pandas warnings
+warnings.filterwarnings('ignore', category=FutureWarning, module='pandas')
+warnings.filterwarnings('ignore', message='.*get_loc.*deprecated.*')
+warnings.filterwarnings('ignore', message='.*Setting an item of incompatible dtype.*')
 
 try:
     import cupy as cp
@@ -43,6 +48,11 @@ class StockData(object):
         self.start_date = start_date
         self.end_date = end_date
         self.data = yf.download(self.ticker, start=self.start_date, end=self.end_date, interval=interval)
+        
+        # Handle MultiIndex columns that yfinance sometimes returns
+        if isinstance(self.data.columns, pd.MultiIndex):
+            self.data.columns = self.data.columns.droplevel(1)
+        
         self.start_date = self.data.index[0]
         self.end_date = self.data.index[-1]
         #BUG!!! when getting 1wk data, the index is on Monday, but the data is on Friday
@@ -121,10 +131,12 @@ class StockData(object):
 
     def get_indicators(self, column='Close', ma_windows=[5, 10, 20, 50, 200], below_thresholds=[30], above_thresholds=[15]):
         for ma_window in ma_windows:
-            self.data['MA{}'.format(ma_window)] = self.data[column].rolling(
+            ma_col = 'MA{}'.format(ma_window)
+            self.data[ma_col] = self.data[column].rolling(
                 window=ma_window, min_periods=1).mean()
-            self.data['price_to_MA{}'.format(
-                ma_window)] = self.data[column] / self.data['MA{}'.format(ma_window)]
+            self.data['price_to_MA{}'.format(ma_window)] = (
+                self.data[column] / self.data[ma_col]
+            ).squeeze()
 
     def get_thresholds(self, column='Close', ma_windows=[5, 10, 20, 50, 200], below_thresholds=[30], above_thresholds=[15]):
         for below_threshold in below_thresholds:
@@ -291,7 +303,7 @@ class Threshold(Strategy):
         self.joined_data[ma_str] = self.joined_data['Close'].rolling(
             window=self.signal_ma_window).mean()
         # fix the NA value in the MA column, cupy is not happy with NA value
-        self.joined_data[ma_str].fillna(method='bfill', inplace=True)
+        self.joined_data[ma_str] = self.joined_data[ma_str].bfill()
 
         # Calculate the signal
         # sell signal: price < 30 (sell threshold), and in a downward trend. use sma20>price as a proxy of downward trend
@@ -357,13 +369,13 @@ class StochasticCross(Strategy):
         #keep all daily data, patch weekly data that has a corresponding daily data
         self.joined_data = d_df[['DClose','D%K','D%D']].merge(w_df[['WClose','W%K','W%D','W%K-UP','FastW%K', '13MIN', '13MAX', 'Weekday']], how='left', left_index=True, right_index=True)
         #fill in the NA value in W%K, W%D with the previous available value
-        self.joined_data['W%K'] = self.joined_data['W%K'].fillna(method='ffill')
-        self.joined_data['W%K-UP'] = self.joined_data['W%K-UP'].fillna(method='ffill')
-        self.joined_data['W%D'] = self.joined_data['W%D'].fillna(method='ffill')
-        self.joined_data['WClose'] = self.joined_data['WClose'].fillna(method='ffill')
+        self.joined_data['W%K'] = self.joined_data['W%K'].ffill()
+        self.joined_data['W%K-UP'] = self.joined_data['W%K-UP'].ffill()
+        self.joined_data['W%D'] = self.joined_data['W%D'].ffill()
+        self.joined_data['WClose'] = self.joined_data['WClose'].ffill()
 
-        self.joined_data['13MIN'] = self.joined_data['13MIN'].fillna(method='ffill')
-        self.joined_data['13MAX'] = self.joined_data['13MAX'].fillna(method='ffill')
+        self.joined_data['13MIN'] = self.joined_data['13MIN'].ffill()
+        self.joined_data['13MAX'] = self.joined_data['13MAX'].ffill()
 
         #intra-week weekly %K issue:
         # use 13 weeks WClose and today's DClose to calculate the 14 weeks intra-week weekly FAST-WD%K
@@ -428,7 +440,7 @@ class StochasticCross(Strategy):
                 #convert to fifo to pandas dataframe with column name 'FastW%K'
                 fifo_df = pd.DataFrame(fifo_fastk, columns=['FastW%K'])
                 #add the self.joined_data.loc[i, 'WD%FASTK']  to the fifo_df
-                fifo_df = fifo_df.append(pd.DataFrame([self.joined_data.loc[i, 'FAST-WD%K']]), ignore_index=True)
+                fifo_df = pd.concat([fifo_df, pd.DataFrame([self.joined_data.loc[i, 'FAST-WD%K']])], ignore_index=True)
                 get_ema(fifo_df, 'FastW%K','WD%K',5)
                 self.joined_data.loc[i, 'WD%K'] = fifo_df.loc[4, 'WD%K']
 """
@@ -497,20 +509,27 @@ class fftynaa200r_stg(Strategy):
         ffty = indicators[0]
         naa200r = indicators[1]
         ## ffty signals
-        get_sma(ffty.data, 'Close','Close-SMA200',self.ffty_ma_window)
-        ffty_signals_df = ffty.data[['Close','Close-SMA200']].copy()
-        ffty_signals_df.rename(columns={'Close':'FFTY', 'Close-SMA200':'FFTY-SMA200'}, inplace=True)
-        ffty_signals_df['FFTY_Signal'] = np.where((ffty_signals_df[ffty.ticker] >= ffty_signals_df['FFTY-SMA200'] * self.ffty_buy_threshold)
-                                                  & (ffty_signals_df[ffty.ticker].shift(1) < ffty_signals_df['FFTY-SMA200'].shift(1)) , 1.0, 0.0)
-        ffty_signals_df['FFTY_Signal'] = np.where((ffty_signals_df[ffty.ticker] < ffty_signals_df['FFTY-SMA200'] * self.ffty_sell_threshold)
-                                                  & (ffty_signals_df[ffty.ticker].shift(1) > ffty_signals_df['FFTY-SMA200'].shift(1)), -1, ffty_signals_df['FFTY_Signal'])
-        ffty_signals_df['FFTY_TO_SMA200'] = (ffty_signals_df[ffty.ticker] - ffty_signals_df['FFTY-SMA200'])/ffty_signals_df['FFTY-SMA200']
+        # Handle multi-level columns from yfinance data
+        if isinstance(ffty.data.columns, pd.MultiIndex):
+            close_col = ('Close', ffty.ticker)
+            ffty.data[('Close-SMA200', '')] = ffty.data[close_col].rolling(window=self.ffty_ma_window).mean()
+            ffty_signals_df = ffty.data[[close_col, ('Close-SMA200', '')]].copy()
+            ffty_signals_df.columns = ['FFTY', 'FFTY-SMA200']
+        else:
+            get_sma(ffty.data, 'Close','Close-SMA200',self.ffty_ma_window)
+            ffty_signals_df = ffty.data[['Close','Close-SMA200']].copy()
+            ffty_signals_df.rename(columns={'Close':'FFTY', 'Close-SMA200':'FFTY-SMA200'}, inplace=True)
+        ffty_signals_df['FFTY_Signal'] = np.where((ffty_signals_df['FFTY'] >= ffty_signals_df['FFTY-SMA200'] * self.ffty_buy_threshold)
+                                                  & (ffty_signals_df['FFTY'].shift(1) < ffty_signals_df['FFTY-SMA200'].shift(1)) , 1.0, 0.0)
+        ffty_signals_df['FFTY_Signal'] = np.where((ffty_signals_df['FFTY'] < ffty_signals_df['FFTY-SMA200'] * self.ffty_sell_threshold)
+                                                  & (ffty_signals_df['FFTY'].shift(1) > ffty_signals_df['FFTY-SMA200'].shift(1)), -1, ffty_signals_df['FFTY_Signal'])
+        ffty_signals_df['FFTY_TO_SMA200'] = (ffty_signals_df['FFTY'] - ffty_signals_df['FFTY-SMA200'])/ffty_signals_df['FFTY-SMA200']
         ##naa200r as buy and sell signals
         get_sma(naa200r.data,'Close','Close-SMA20', 20)
         naa200r_signals_df = naa200r.data[['Close','Close-SMA20']].copy()
         naa200r_signals_df.rename(columns={'Close':'NAA200R', 'Close-SMA20':'NAA200R-SMA20'}, inplace=True)
-        naa200r_signals_df['NAA200R_Signal'] = np.where((naa200r_signals_df[naa200r.ticker] > self.naa200r_buy_threshold)  & (naa200r_signals_df[naa200r.ticker] > naa200r_signals_df['NAA200R-SMA20']), 1.0, 0.0)
-        naa200r_signals_df['NAA200R_Signal'] = np.where((naa200r_signals_df[naa200r.ticker] < self.naa200r_sell_threshold) & (naa200r_signals_df[naa200r.ticker] < naa200r_signals_df['NAA200R-SMA20']), -1, naa200r_signals_df['NAA200R_Signal'])
+        naa200r_signals_df['NAA200R_Signal'] = np.where((naa200r_signals_df['NAA200R'] > self.naa200r_buy_threshold)  & (naa200r_signals_df['NAA200R'] > naa200r_signals_df['NAA200R-SMA20']), 1.0, 0.0)
+        naa200r_signals_df['NAA200R_Signal'] = np.where((naa200r_signals_df['NAA200R'] < self.naa200r_sell_threshold) & (naa200r_signals_df['NAA200R'] < naa200r_signals_df['NAA200R-SMA20']), -1, naa200r_signals_df['NAA200R_Signal'])
 
         self.joined_data = ffty_signals_df.merge(naa200r_signals_df, how='left', left_index=True, right_index=True).sort_index()
 
@@ -556,6 +575,22 @@ class Portfolio(metaclass=ABCMeta):
         self.trade_records = pd.DataFrame(columns=[
                                           'Buy Date', 'Sell Date', 'Ticker', 'Quant', 'Buy Price', 'Sell Price', 'Profit', 'Profit %',
                                           'HoldingDays','LongTermProfit','ShortTermProfit', 'TaxCollectYear', 'TaxCollected'])
+        # Set proper dtypes to avoid warnings
+        self.trade_records = self.trade_records.astype({
+            'Buy Date': 'datetime64[ns]',
+            'Sell Date': 'datetime64[ns]',
+            'Ticker': 'object',
+            'Quant': 'float64',
+            'Buy Price': 'float64',
+            'Sell Price': 'float64',
+            'Profit': 'float64',
+            'Profit %': 'float64',
+            'HoldingDays': 'float64',
+            'LongTermProfit': 'float64',
+            'ShortTermProfit': 'float64',
+            'TaxCollectYear': 'float64',
+            'TaxCollected': 'float64'
+        })
 
     @abstractmethod
     def run_backtest(self, strategy: Strategy, stock_data: StockData):
@@ -727,10 +762,16 @@ class BackTest(Portfolio):
         sd = max(start_date, stock_data.data.index.min())
         ed = min(end_date, stock_data.data.index.max())
 
-        #copy the stock data index to the self.balance['Date'] within the given date range
-        self.balance = stock_data.data[['Close','Weekday']].loc[sd:ed].copy()
-        #rename Close to stocker_data.ticker
-        self.balance.rename(columns={'Close': stock_data.ticker}, inplace=True)
+        # Handle multi-level columns from yfinance data
+        if isinstance(stock_data.data.columns, pd.MultiIndex):
+            close_col = ('Close', stock_data.ticker)
+            weekday_col = ('Weekday', '')
+            self.balance = stock_data.data[[close_col, weekday_col]].loc[sd:ed].copy()
+            # Flatten the multi-level columns
+            self.balance.columns = [stock_data.ticker, 'Weekday']
+        else:
+            self.balance = stock_data.data[['Close','Weekday']].loc[sd:ed].copy()
+            self.balance.rename(columns={'Close': stock_data.ticker}, inplace=True)
 
         #merge the strategy signal to the balance
         if 'BSignal' in strategy.trades.columns and 'SSignal' in strategy.trades.columns:
@@ -744,13 +785,13 @@ class BackTest(Portfolio):
         #fill Signal the NaN with 0
         self.balance['Signal'].fillna(0, inplace=True)
 
-        self.balance['Cash'] = 0
-        self.balance['Stock'] = 0
-        self.balance['Total'] = 0
-        self.balance['Margin'] = 0
-        self.balance['Trade'] = 0
-        self.balance['Buy Price'] = 0
-        self.balance['Profit'] = 0
+        self.balance['Cash'] = 0.0
+        self.balance['Stock'] = 0.0
+        self.balance['Total'] = 0.0
+        self.balance['Margin'] = 0.0
+        self.balance['Trade'] = 0.0
+        self.balance['Buy Price'] = 0.0
+        self.balance['Profit'] = 0.0
 
         self.balance.loc[self.balance.index[0], 'Cash'] = self.principal
         self.balance.loc[self.balance.index[0], 'Total'] = self.principal
