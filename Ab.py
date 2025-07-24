@@ -49,6 +49,13 @@ from core.indicators import get_sma, get_ema, get_stochastic
 from core.strategy_base import Strategy
 from core.portfolio import Portfolio, BackTest
 
+# Phase 2 enhancements
+from core.strategy_factory import StrategyFactory, create_strategy
+from core.config import ConfigManager, get_config
+from core.validators import DataValidator, ParameterValidator
+from core.exceptions import get_error_handler
+from core.performance import get_performance_monitor, timer, cached
+
 # Basic strategies
 from strategies.basic_strategies import BuyAndHold, MACross, MAThreshold
 from strategies.threshold_strategies import Threshold
@@ -82,6 +89,18 @@ __all__ = [
     'get_ema', 
     'get_stochastic',
     
+    # Phase 2 enhancements
+    'StrategyFactory',
+    'create_strategy',
+    'ConfigManager',
+    'get_config',
+    'DataValidator',
+    'ParameterValidator',
+    'get_error_handler',
+    'get_performance_monitor',
+    'timer',
+    'cached',
+    
     # Utility functions (from utils.helpers)
     'validate_date_range',
     'format_percentage',
@@ -98,7 +117,7 @@ __all__ = [
 ]
 
 # Module metadata
-__version__ = "2.0.0"
+__version__ = "2.1.0"
 __author__ = "Backtesting Framework Team"
 __description__ = "Algorithmic backtesting framework for financial markets"
 
@@ -159,6 +178,116 @@ def quick_backtest(ticker, strategy_class, start_date, end_date, **strategy_para
     
     return backtest
 
+def create_strategy_by_name(strategy_name, **params):
+    """
+    Create strategy using the factory pattern (Phase 2 enhancement).
+    
+    Args:
+        strategy_name (str): Name of the strategy
+        **params: Strategy parameters
+        
+    Returns:
+        Strategy: Created strategy instance
+    """
+    return StrategyFactory.create_strategy(strategy_name, **params)
+
+def optimized_backtest(ticker, strategy_name, start_date, end_date, **params):
+    """
+    Run an optimized backtest with Phase 2 enhancements.
+    
+    Args:
+        ticker (str): Stock ticker symbol
+        strategy_name (str): Name of the strategy
+        start_date: Backtest start date
+        end_date: Backtest end date
+        **params: Strategy and backtest parameters
+        
+    Returns:
+        BackTest: Completed backtest object with performance monitoring
+    """
+    monitor = get_performance_monitor()
+    
+    monitor.start_timer("total_backtest")
+    
+    try:
+        # Load configuration
+        config = get_config()
+        
+        # Load and validate data
+        monitor.start_timer("data_loading")
+        stock_data = StockData(ticker)
+        stock_data.get_data_from_yfinance(ticker, start_date, end_date)
+        
+        # Validate data
+        validator = DataValidator()
+        report = validator.validate_price_data(stock_data.data, ticker)
+        if not report['valid']:
+            print(f"Data validation warnings for {ticker}: {report['warnings']}")
+        
+        monitor.stop_timer("data_loading")
+        
+        # Create strategy using factory
+        monitor.start_timer("strategy_creation")
+        strategy = StrategyFactory.create_strategy(strategy_name, **params)
+        monitor.stop_timer("strategy_creation")
+        
+        # Run strategy
+        monitor.start_timer("strategy_execution")
+        strategy.run_strategy(stock_data, start_date, end_date)
+        monitor.stop_timer("strategy_execution")
+        
+        # Run backtest
+        monitor.start_timer("backtest_execution")
+        backtest = BackTest(
+            principal=config.get_backtest_config().initial_capital,
+            trade_size=config.get_backtest_config().trade_size
+        )
+        
+        backtest.run_backtest(
+            strategy, stock_data, start_date, end_date, 
+            long_term_tax_rate=config.get_backtest_config().long_term_tax_rate,
+            short_term_tax_rate=config.get_backtest_config().short_term_tax_rate,
+            verbose=config.get_backtest_config().verbose
+        )
+        monitor.stop_timer("backtest_execution")
+        
+        return backtest
+        
+    finally:
+        monitor.stop_timer("total_backtest")
+        
+        # Print performance summary if verbose
+        if get_config().get_backtest_config().verbose:
+            monitor.print_summary()
+
+def show_framework_info():
+    """Show comprehensive framework information including Phase 2 features."""
+    print(f"Algorithmic Backtesting Framework v{__version__}")
+    print("=" * 60)
+    print("PHASE 1 - Core Framework:")
+    print("• core.data_handler - StockData class")
+    print("• core.indicators - Technical indicators") 
+    print("• core.strategy_base - Strategy base class")
+    print("• core.portfolio - Portfolio and BackTest classes")
+    print("• strategies.* - Various trading strategies")
+    print("• utils.* - Helper functions and constants")
+    print()
+    print("PHASE 2 - Enhanced Features:")
+    print("• core.strategy_factory - Factory pattern for strategy creation")
+    print("• core.config - Centralized configuration management")
+    print("• core.validators - Data validation and parameter checking")
+    print("• core.exceptions - Improved error handling")
+    print("• core.performance - Performance monitoring and optimization")
+    print()
+    print("Available Functions:")
+    print("• list_strategies() - Show available strategies")
+    print("• quick_backtest() - Rapid strategy testing")
+    print("• create_strategy_by_name() - Factory-based strategy creation")
+    print("• optimized_backtest() - Enhanced backtest with monitoring")
+    print("• get_config() - Access configuration settings")
+    print("• get_performance_monitor() - Access performance monitoring")
+    print("=" * 60)
+
 # Backward compatibility aliases and wrapper functions
 # These ensure that existing notebooks continue to work without modification
 
@@ -186,14 +315,23 @@ def stochastic_indicator(df, column, out_fastk, out_k, out_d, k_window, fk_windo
 # Print framework information on import
 print(f"Algorithmic Backtesting Framework v{__version__} loaded successfully")
 print("=" * 60)
-print("New modular structure available:")
+print("PHASE 1 - Core modular structure:")
 print("• core.data_handler - StockData class")
 print("• core.indicators - Technical indicators") 
 print("• core.strategy_base - Strategy base class")
 print("• core.portfolio - Portfolio and BackTest classes")
 print("• strategies.* - Various trading strategies")
 print("• utils.* - Helper functions and constants")
+print()
+print("PHASE 2 - Enhanced capabilities:")
+print("• Strategy factory pattern with create_strategy_by_name()")
+print("• Configuration management with get_config()")
+print("• Data validation and error handling")
+print("• Performance monitoring with get_performance_monitor()")
+print("• Optimized backtesting with optimized_backtest()")
 print("=" * 60)
-print("Use list_strategies() to see available strategies")
-print("Use quick_backtest() for rapid strategy testing")
+print("Quick Start:")
+print("• list_strategies() - See available strategies")
+print("• show_framework_info() - Comprehensive feature overview") 
+print("• optimized_backtest('TQQQ', 'buyandhold', '2023-01-01', '2023-12-31')")
 print("=" * 60)
